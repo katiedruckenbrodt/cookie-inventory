@@ -8,17 +8,31 @@ Data lives in data/cookie_inventory.db (SQLite). All money/box figures shown
 on every page are computed live from that database — nothing is hardcoded.
 """
 
+import json
 import sqlite3
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from dotenv import load_dotenv
+
+# env.txt lives one level up, in the workspace root shared by all the
+# student's apps, not inside this repo — so we point at it explicitly rather
+# than passing a bare filename that only resolves from the workspace root.
+load_dotenv(Path(__file__).resolve().parent.parent / "env.txt", override=True)
+
+from fastapi import FastAPI, Form, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from openai import OpenAI
+from pydantic import BaseModel
 
 DB_PATH = Path(__file__).parent / "data" / "cookie_inventory.db"
 DB_PATH.parent.mkdir(exist_ok=True)
+
+chat_client = OpenAI(base_url="https://openrouter.ai/api/v1")  # reads OPENAI_API_KEY
+CHAT_MODEL = "openai/gpt-4o-mini"
 
 app = FastAPI(title="Troop Cookie Inventory (ABC Bakers)")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
@@ -108,6 +122,7 @@ def layout(title: str, body: str) -> HTMLResponse:
         ("/booth", "Booth Sale"),
         ("/payments", "Record Payment"),
         ("/ledger", "Full Ledger"),
+        ("/chatbot", "Ask Tony"),
     ]
     nav = "<nav>" + "".join(f'<a href="{href}">{label}</a>' for href, label in links) + "</nav>"
 
@@ -539,3 +554,340 @@ def ledger():
     </table>
     """
     return layout("Full Ledger", body)
+
+
+# ---------------------------------------------------------------- Chatbot (parent-facing)
+# Every fact and every action below is looked up or performed against the same
+# transactions ledger as the rest of the site — the model never gets to state
+# a number itself, only relay what these functions returned.
+
+def find_scout(db, identifier: str):
+    """Return (row, None) on a unique match, or (None, error_message)."""
+    identifier = identifier.strip()
+    bare = identifier.lstrip("#")
+    if bare.isdigit():
+        row = db.execute("SELECT * FROM scouts WHERE number = ?", (int(bare),)).fetchone()
+        if row:
+            return row, None
+    exact = db.execute("SELECT * FROM scouts WHERE lower(name) = lower(?)", (identifier,)).fetchall()
+    if len(exact) == 1:
+        return exact[0], None
+    if len(exact) > 1:
+        return None, f"More than one scout is named '{identifier}' — ask for the roster number instead."
+    partial = db.execute("SELECT * FROM scouts WHERE lower(name) LIKE lower(?)", (f"%{identifier}%",)).fetchall()
+    if len(partial) == 1:
+        return partial[0], None
+    if len(partial) > 1:
+        names = ", ".join(f"#{r['number']} {r['name']}" for r in partial)
+        return None, f"More than one scout matches '{identifier}': {names}. Ask for the roster number."
+    return None, f"No scout on the roster matches '{identifier}'."
+
+
+def find_variety(db, name: str):
+    name = name.strip()
+    exact = db.execute("SELECT * FROM varieties WHERE lower(name) = lower(?)", (name,)).fetchone()
+    if exact:
+        return exact, None
+    partial = db.execute("SELECT * FROM varieties WHERE lower(name) LIKE lower(?)", (f"%{name}%",)).fetchall()
+    if len(partial) == 1:
+        return partial[0], None
+    all_names = ", ".join(r["name"] for r in db.execute("SELECT name FROM varieties ORDER BY name").fetchall())
+    if len(partial) > 1:
+        return None, f"More than one variety matches '{name}': {', '.join(r['name'] for r in partial)}. Be specific."
+    return None, f"No cookie variety matches '{name}'. This season's lineup is: {all_names}."
+
+
+def variety_stock(db, variety_id: int) -> int:
+    return db.execute("""
+        SELECT COALESCE(SUM(CASE WHEN type='receive' THEN quantity
+                                   WHEN type='return' THEN quantity
+                                   WHEN type='checkout' THEN -quantity
+                                   WHEN type='booth_sale' THEN -quantity
+                                   WHEN type='adjustment' THEN quantity
+                                   ELSE 0 END), 0) AS stock
+        FROM transactions WHERE variety_id = ?
+    """, (variety_id,)).fetchone()["stock"]
+
+
+def scout_balance(db, scout) -> dict:
+    per_variety = db.execute("""
+        SELECT v.name AS variety,
+               COALESCE(SUM(CASE WHEN t.type='checkout' THEN t.quantity
+                                  WHEN t.type='return' THEN -t.quantity
+                                  ELSE 0 END), 0) AS boxes
+        FROM transactions t JOIN varieties v ON v.id = t.variety_id
+        WHERE t.scout_id = ?
+        GROUP BY v.id
+        HAVING boxes != 0
+        ORDER BY v.name
+    """, (scout["id"],)).fetchall()
+    owed = db.execute("""
+        SELECT COALESCE(SUM(CASE WHEN type='checkout' THEN amount
+                                  WHEN type='return' THEN -amount
+                                  WHEN type='payment' THEN -amount
+                                  ELSE 0 END), 0) AS n
+        FROM transactions WHERE scout_id = ?
+    """, (scout["id"],)).fetchone()["n"]
+    paid = db.execute("""
+        SELECT COALESCE(SUM(amount), 0) AS n FROM transactions WHERE scout_id = ? AND type = 'payment'
+    """, (scout["id"],)).fetchone()["n"]
+    return {
+        "scout_number": scout["number"],
+        "scout_name": scout["name"],
+        "boxes_currently_checked_out": [{"variety": r["variety"], "boxes": r["boxes"]} for r in per_variety],
+        "amount_owed": round(owed, 2),
+        "amount_paid_so_far": round(paid, 2),
+    }
+
+
+def tool_check_balance(args: dict) -> dict:
+    with get_db() as db:
+        scout, err = find_scout(db, str(args.get("scout_identifier", "")))
+        if err:
+            return {"error": err}
+        return scout_balance(db, scout)
+
+
+def tool_request_cookies(args: dict) -> dict:
+    try:
+        quantity = int(args.get("quantity", 0))
+    except (TypeError, ValueError):
+        return {"error": "Quantity has to be a whole number of boxes."}
+    if quantity <= 0:
+        return {"error": "Quantity has to be a positive number of boxes."}
+    with get_db() as db:
+        scout, err = find_scout(db, str(args.get("scout_identifier", "")))
+        if err:
+            return {"error": err}
+        variety, err = find_variety(db, str(args.get("variety_name", "")))
+        if err:
+            return {"error": err}
+        stock = variety_stock(db, variety["id"])
+        if quantity > stock:
+            return {"error": f"Only {stock} box(es) of {variety['name']} on hand in troop stock — can't check out {quantity}."}
+        db.execute(
+            "INSERT INTO transactions (ts, type, variety_id, scout_id, quantity, amount, note) "
+            "VALUES (?, 'checkout', ?, ?, ?, ?, ?)",
+            (datetime.now().isoformat(timespec="seconds"), variety["id"], scout["id"],
+             quantity, quantity * variety["price"], "requested via chatbot"),
+        )
+        balance = scout_balance(db, scout)
+    return {"success": True, "checked_out": quantity, "variety": variety["name"], "balance": balance}
+
+
+TOOL_IMPLS = {
+    "check_balance": tool_check_balance,
+    "request_cookies": tool_request_cookies,
+}
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "check_balance",
+            "description": (
+                "Look up a scout's current balance: boxes she's currently checked out per "
+                "variety, total amount owed, and total payments made so far. Call this "
+                "whenever a parent asks what their scout owes, has, or has paid."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scout_identifier": {
+                        "type": "string",
+                        "description": "The scout's roster number (e.g. '14') or her name.",
+                    },
+                },
+                "required": ["scout_identifier"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "request_cookies",
+            "description": (
+                "Check out additional boxes of one cookie variety to a scout from troop "
+                "stock, on a parent's request. Fails if the troop doesn't have that many "
+                "boxes on hand, or if the scout or variety can't be identified."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scout_identifier": {
+                        "type": "string",
+                        "description": "The scout's roster number (e.g. '14') or her name.",
+                    },
+                    "variety_name": {
+                        "type": "string",
+                        "description": "Cookie variety name, e.g. 'Thin Mints'.",
+                    },
+                    "quantity": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Number of boxes to check out.",
+                    },
+                },
+                "required": ["scout_identifier", "variety_name", "quantity"],
+            },
+        },
+    },
+]
+
+SYSTEM_PROMPT = (
+    "You are Tony Soprano, and the troop's parents come to you for two things: "
+    "checking their scout's cookie balance, and asking for more boxes for her to sell. "
+    "Talk exactly like Tony — North Jersey Italian-American, blunt, world-weary, "
+    "'fuhgeddaboudit', 'this thing of ours', gripes about family, therapy, and ducks, "
+    "the occasional veiled threat delivered calm as a Sunday gravy — but keep it "
+    "PG-rated and actually helpful; this is a Girl Scout cookie operation, not a crime "
+    "family, and there's kids reading over their parents' shoulders. "
+    "\n\n"
+    "You have two tools: check_balance and request_cookies. Every number you say — boxes, "
+    "dollars, what's owed, what's paid, what's in stock — has to come from calling one of "
+    "these tools. Never invent a figure. Before you can call either tool you need to know "
+    "which scout: if the parent hasn't given a roster number or name yet, ask for it. "
+    "If a tool call comes back with an error (scout not found, ambiguous match, variety not "
+    "found, not enough stock), say so plainly in character and ask what they'd like to do "
+    "instead — don't claim something succeeded when it didn't."
+)
+
+CHAT_SESSIONS: dict[str, list] = {}
+SESSION_COOKIE = "cookie_bot_session"
+
+
+def get_session(request: Request) -> tuple[str, list]:
+    sid = request.cookies.get(SESSION_COOKIE)
+    if not sid or sid not in CHAT_SESSIONS:
+        sid = uuid.uuid4().hex
+        CHAT_SESSIONS[sid] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    return sid, CHAT_SESSIONS[sid]
+
+
+def run_chat_turn(history: list) -> str:
+    for _ in range(5):
+        completion = chat_client.chat.completions.create(model=CHAT_MODEL, messages=history, tools=TOOLS)
+        msg = completion.choices[0].message
+        if msg.tool_calls:
+            history.append({
+                "role": "assistant",
+                "content": msg.content,
+                "tool_calls": [tc.model_dump() for tc in msg.tool_calls],
+            })
+            for tc in msg.tool_calls:
+                impl = TOOL_IMPLS.get(tc.function.name)
+                try:
+                    args = json.loads(tc.function.arguments or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                result = impl(args) if impl else {"error": f"Unknown tool {tc.function.name}"}
+                history.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": json.dumps(result),
+                })
+            continue
+        history.append({"role": "assistant", "content": msg.content})
+        return msg.content
+    return "Ay, my head's spinnin' — too much back and forth. Ask me again, simpler."
+
+
+class ChatMessage(BaseModel):
+    message: str
+
+
+@app.get("/chatbot", response_class=HTMLResponse)
+def chatbot_page(request: Request):
+    sid, _ = get_session(request)
+    body = """
+    <p class="muted">This is Tony. Tell him the scout's roster number or name, then ask
+    what she owes or ask him to send over more boxes.</p>
+    <div id="log" style="background:#fff; border:2px solid #E8DCC8; border-radius:12px;
+         padding:1rem; height:420px; overflow-y:auto; margin-bottom:1rem;
+         box-shadow:0 2px 8px rgba(0,0,0,.05);"></div>
+    <div style="display:flex; gap:.5rem;">
+      <input id="chatInput" type="text" placeholder="Talk to Tony..." autocomplete="off"
+             style="flex:1; padding:.55rem; border:1px solid #ddd; border-radius:8px; box-sizing:border-box;">
+      <button id="chatSend" style="margin:0;">Send</button>
+      <button id="chatReset" type="button" style="margin:0; background:#888; background-image:none;">Reset</button>
+    </div>
+    <script>
+    (function () {
+      const log = document.getElementById("log");
+      const input = document.getElementById("chatInput");
+      const sendBtn = document.getElementById("chatSend");
+      const resetBtn = document.getElementById("chatReset");
+
+      function addMessage(role, text) {
+        const row = document.createElement("div");
+        row.style.margin = "8px 0";
+        row.style.textAlign = role === "user" ? "right" : "left";
+        const span = document.createElement("span");
+        span.style.display = "inline-block";
+        span.style.padding = "8px 12px";
+        span.style.borderRadius = "12px";
+        span.style.maxWidth = "80%";
+        span.style.whiteSpace = "pre-wrap";
+        span.style.background = role === "user" ? "#7BA64A" : "#FBF7EA";
+        span.style.color = role === "user" ? "#fff" : "#2b2b2b";
+        span.textContent = text;
+        row.appendChild(span);
+        log.appendChild(row);
+        log.scrollTop = log.scrollHeight;
+      }
+
+      async function send() {
+        const message = input.value.trim();
+        if (!message) return;
+        addMessage("user", message);
+        input.value = "";
+        sendBtn.disabled = true;
+        try {
+          const res = await fetch("/chatbot/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message }),
+          });
+          if (!res.ok) throw new Error("Request failed: " + res.status);
+          const data = await res.json();
+          addMessage("assistant", data.reply);
+        } catch (err) {
+          addMessage("assistant", "Ay, something broke: " + err.message);
+        } finally {
+          sendBtn.disabled = false;
+          input.focus();
+        }
+      }
+
+      sendBtn.addEventListener("click", send);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); send(); }
+      });
+      resetBtn.addEventListener("click", async () => {
+        await fetch("/chatbot/reset", { method: "POST" });
+        log.innerHTML = "";
+      });
+    })();
+    </script>
+    """
+    response = layout("Ask Tony", body)
+    response.set_cookie(SESSION_COOKIE, sid, httponly=True, samesite="lax")
+    return response
+
+
+@app.post("/chatbot/chat")
+def chatbot_chat(payload: ChatMessage, request: Request):
+    sid, history = get_session(request)
+    history.append({"role": "user", "content": payload.message})
+    reply = run_chat_turn(history)
+    response = JSONResponse({"reply": reply})
+    response.set_cookie(SESSION_COOKIE, sid, httponly=True, samesite="lax")
+    return response
+
+
+@app.post("/chatbot/reset")
+def chatbot_reset(request: Request):
+    sid = request.cookies.get(SESSION_COOKIE)
+    if sid and sid in CHAT_SESSIONS:
+        CHAT_SESSIONS[sid] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    return {"status": "ok"}
