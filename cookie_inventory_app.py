@@ -15,11 +15,13 @@ from pathlib import Path
 
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 DB_PATH = Path(__file__).parent / "data" / "cookie_inventory.db"
 DB_PATH.parent.mkdir(exist_ok=True)
 
 app = FastAPI(title="Troop Cookie Inventory (ABC Bakers)")
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 # ABC Bakers lineup for this troop, per the student (naming differs from
 # Little Brownie Bakers, e.g. "Caramel deLites" not "Samoas"). No
@@ -89,27 +91,10 @@ def init_db():
 init_db()
 
 
-# Binx, the troop's lop-eared rabbit mascot — drawn as inline SVG so the app
-# has no external image dependency.
+# Binx, the troop's lop-eared rabbit mascot.
 MASCOT_SVG = """
-<svg viewBox="0 0 100 120" width="76" height="91" role="img" aria-label="Binx the lop-eared rabbit, troop mascot">
-  <ellipse cx="30" cy="72" rx="11" ry="34" fill="#D5AF9A" transform="rotate(-18 30 72)"/>
-  <ellipse cx="70" cy="72" rx="11" ry="34" fill="#D5AF9A" transform="rotate(18 70 72)"/>
-  <ellipse cx="30" cy="70" rx="5.5" ry="24" fill="#FAB99D" transform="rotate(-18 30 70)"/>
-  <ellipse cx="70" cy="70" rx="5.5" ry="24" fill="#FAB99D" transform="rotate(18 70 70)"/>
-  <ellipse cx="50" cy="103" rx="27" ry="15" fill="#FFF6E8"/>
-  <rect x="37" y="93" width="26" height="17" rx="2.5" fill="#75381C" stroke="#4A2410" stroke-width="1.5"/>
-  <rect x="37" y="99.5" width="26" height="4.5" fill="#FAB99D"/>
-  <circle cx="50" cy="60" r="27" fill="#FFF6E8" stroke="#FAB99D" stroke-width="2"/>
-  <circle cx="36" cy="66" r="4.5" fill="#F2C8A0" opacity=".85"/>
-  <circle cx="64" cy="66" r="4.5" fill="#F2C8A0" opacity=".85"/>
-  <circle cx="41" cy="56" r="3.2" fill="#3a3a3a"/>
-  <circle cx="59" cy="56" r="3.2" fill="#3a3a3a"/>
-  <circle cx="42.2" cy="54.8" r="1" fill="#fff"/>
-  <circle cx="60.2" cy="54.8" r="1" fill="#fff"/>
-  <path d="M50 61 l-3.6 3.6 h7.2 z" fill="#E8635A"/>
-  <path d="M50 64.6 q0 3.6 -3.8 4.8 M50 64.6 q0 3.6 3.8 4.8" stroke="#8C5A2B" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-</svg>
+<img src="/static/binx.jpeg" alt="Binx the lop-eared rabbit, troop mascot" width="76" height="76"
+     style="border-radius: 12px; object-fit: cover; box-shadow: 0 2px 6px rgba(0,0,0,.15);">
 """
 
 
