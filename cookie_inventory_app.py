@@ -93,22 +93,22 @@ init_db()
 # has no external image dependency.
 MASCOT_SVG = """
 <svg viewBox="0 0 100 120" width="76" height="91" role="img" aria-label="Binx the lop-eared rabbit, troop mascot">
-  <ellipse cx="30" cy="72" rx="11" ry="34" fill="#b98ee8" transform="rotate(-18 30 72)"/>
-  <ellipse cx="70" cy="72" rx="11" ry="34" fill="#b98ee8" transform="rotate(18 70 72)"/>
-  <ellipse cx="30" cy="70" rx="5.5" ry="24" fill="#f6d6f2" transform="rotate(-18 30 70)"/>
-  <ellipse cx="70" cy="70" rx="5.5" ry="24" fill="#f6d6f2" transform="rotate(18 70 70)"/>
-  <ellipse cx="50" cy="103" rx="27" ry="15" fill="#fff9f0"/>
-  <rect x="37" y="93" width="26" height="17" rx="2.5" fill="#d69a52" stroke="#8f5f2e" stroke-width="1.5"/>
-  <rect x="37" y="99.5" width="26" height="4.5" fill="#ff8fb3"/>
-  <circle cx="50" cy="60" r="27" fill="#fff9f0" stroke="#f0a8c9" stroke-width="2"/>
-  <circle cx="36" cy="66" r="4.5" fill="#ffc2de" opacity=".85"/>
-  <circle cx="64" cy="66" r="4.5" fill="#ffc2de" opacity=".85"/>
+  <ellipse cx="30" cy="72" rx="11" ry="34" fill="#D5AF9A" transform="rotate(-18 30 72)"/>
+  <ellipse cx="70" cy="72" rx="11" ry="34" fill="#D5AF9A" transform="rotate(18 70 72)"/>
+  <ellipse cx="30" cy="70" rx="5.5" ry="24" fill="#FAB99D" transform="rotate(-18 30 70)"/>
+  <ellipse cx="70" cy="70" rx="5.5" ry="24" fill="#FAB99D" transform="rotate(18 70 70)"/>
+  <ellipse cx="50" cy="103" rx="27" ry="15" fill="#FFF6E8"/>
+  <rect x="37" y="93" width="26" height="17" rx="2.5" fill="#75381C" stroke="#4A2410" stroke-width="1.5"/>
+  <rect x="37" y="99.5" width="26" height="4.5" fill="#FAB99D"/>
+  <circle cx="50" cy="60" r="27" fill="#FFF6E8" stroke="#FAB99D" stroke-width="2"/>
+  <circle cx="36" cy="66" r="4.5" fill="#F2C8A0" opacity=".85"/>
+  <circle cx="64" cy="66" r="4.5" fill="#F2C8A0" opacity=".85"/>
   <circle cx="41" cy="56" r="3.2" fill="#3a3a3a"/>
   <circle cx="59" cy="56" r="3.2" fill="#3a3a3a"/>
   <circle cx="42.2" cy="54.8" r="1" fill="#fff"/>
   <circle cx="60.2" cy="54.8" r="1" fill="#fff"/>
-  <path d="M50 61 l-3.6 3.6 h7.2 z" fill="#e58aa8"/>
-  <path d="M50 64.6 q0 3.6 -3.8 4.8 M50 64.6 q0 3.6 3.8 4.8" stroke="#c76c8f" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <path d="M50 61 l-3.6 3.6 h7.2 z" fill="#E8635A"/>
+  <path d="M50 64.6 q0 3.6 -3.8 4.8 M50 64.6 q0 3.6 3.8 4.8" stroke="#8C5A2B" stroke-width="1.5" fill="none" stroke-linecap="round"/>
 </svg>
 """
 
@@ -134,18 +134,19 @@ def layout(title: str, body: str) -> HTMLResponse:
       <title>{title} — Troop Cookies</title>
       <style>
         :root {{
-          --pink: #ff6fa5; --purple: #9b6bd6; --teal: #2bb3a3;
-          --orange: #ff9f43; --blue: #4a90d9; --green: #4caf6d;
-          --yellow: #f4c542; --coral: #ff7a6e;
+          --yellow: #F6EA4A; --gold: #D9A02D; --amber: #B8860B;
+          --green: #7BA64A; --moss: #5C8A34; --leaf: #A4DE63;
+          --coral: #FAB99D; --terracotta: #E8635A; --rust: #C1502E;
+          --tan: #D5AF9A; --olive: #A6784F; --brown: #75381C;
         }}
         body {{
           font-family: system-ui, sans-serif; max-width: 980px; margin: 2rem auto; padding: 0 1rem;
           color: #2b2b2b;
-          background: linear-gradient(160deg, #fdf3ff 0%, #f2fbff 45%, #fffaf0 100%);
+          background: linear-gradient(160deg, #FFFBE9 0%, #F3FBE9 45%, #FFF6EA 100%);
         }}
         header.banner {{
           display: flex; align-items: center; gap: 1rem;
-          background: linear-gradient(120deg, var(--pink), var(--purple) 55%, var(--teal));
+          background: linear-gradient(120deg, var(--yellow), var(--leaf) 55%, var(--green));
           border-radius: 16px; padding: 1rem 1.5rem; margin-bottom: 1.25rem;
           box-shadow: 0 4px 14px rgba(0,0,0,.12);
         }}
@@ -157,30 +158,30 @@ def layout(title: str, body: str) -> HTMLResponse:
           padding: .45rem .9rem; border-radius: 999px;
           box-shadow: 0 2px 6px rgba(0,0,0,.1);
         }}
-        nav a:nth-child(8n+1) {{ background: var(--pink); }}
-        nav a:nth-child(8n+2) {{ background: var(--purple); }}
-        nav a:nth-child(8n+3) {{ background: var(--teal); }}
-        nav a:nth-child(8n+4) {{ background: var(--orange); }}
-        nav a:nth-child(8n+5) {{ background: var(--blue); }}
-        nav a:nth-child(8n+6) {{ background: var(--green); }}
-        nav a:nth-child(8n+7) {{ background: var(--coral); }}
-        nav a:nth-child(8n+8) {{ background: #7a6bd6; }}
+        nav a:nth-child(8n+1) {{ background: var(--gold); }}
+        nav a:nth-child(8n+2) {{ background: var(--terracotta); }}
+        nav a:nth-child(8n+3) {{ background: var(--green); }}
+        nav a:nth-child(8n+4) {{ background: var(--brown); }}
+        nav a:nth-child(8n+5) {{ background: var(--olive); }}
+        nav a:nth-child(8n+6) {{ background: var(--moss); }}
+        nav a:nth-child(8n+7) {{ background: var(--rust); }}
+        nav a:nth-child(8n+8) {{ background: var(--amber); }}
         nav a:hover {{ filter: brightness(1.1); transform: translateY(-1px); }}
-        h2 {{ color: var(--purple); }}
+        h2 {{ color: var(--brown); }}
         table {{ border-collapse: collapse; width: 100%; margin: 1rem 0; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,.06); }}
-        th, td {{ border: 1px solid #eadffb; padding: .5rem .75rem; text-align: left; }}
-        th {{ background: var(--purple); color: #fff; }}
-        tr:nth-child(even) {{ background: #faf6ff; }}
-        form {{ background: #fff; border: 2px solid #eadffb; border-radius: 12px; padding: 1rem; margin: 1rem 0; max-width: 480px; box-shadow: 0 2px 8px rgba(0,0,0,.05); }}
-        label {{ display: block; margin-top: .6rem; font-weight: 600; color: var(--purple); }}
+        th, td {{ border: 1px solid #E8DCC8; padding: .5rem .75rem; text-align: left; }}
+        th {{ background: var(--brown); color: #fff; }}
+        tr:nth-child(even) {{ background: #FBF7EA; }}
+        form {{ background: #fff; border: 2px solid #E8DCC8; border-radius: 12px; padding: 1rem; margin: 1rem 0; max-width: 480px; box-shadow: 0 2px 8px rgba(0,0,0,.05); }}
+        label {{ display: block; margin-top: .6rem; font-weight: 600; color: var(--brown); }}
         input, select {{ width: 100%; padding: .4rem; margin-top: .2rem; box-sizing: border-box; border: 1px solid #ddd; border-radius: 6px; }}
         button {{
           margin-top: 1rem; padding: .55rem 1.1rem; color: white; border: none; border-radius: 999px; cursor: pointer;
-          background: linear-gradient(120deg, var(--pink), var(--purple)); font-weight: 600;
+          background: linear-gradient(120deg, var(--terracotta), var(--brown)); font-weight: 600;
         }}
         button:hover {{ filter: brightness(1.08); }}
         .warn {{ background: #fff8e1; border: 1px solid var(--yellow); padding: .75rem 1rem; border-radius: 10px; margin: 1rem 0; }}
-        .neg {{ color: #d6336c; font-weight: 700; }}
+        .neg {{ color: var(--rust); font-weight: 700; }}
         .muted {{ color: #666; font-size: .9em; }}
       </style>
     </head>
